@@ -112,6 +112,9 @@ readable_events_path="$BENCHMARK_WORKSPACE/agent_trace.txt"
 session_path="$BENCHMARK_TRACE_DIR/claude-session-id"
 session_id=""
 
+# Agent model; override for a custom gateway/model (e.g. BENCHMARK_CLAUDE_MODEL=glm-5.1-fp8).
+claude_model="${BENCHMARK_CLAUDE_MODEL:-claude-opus-4-6}"
+
 if [[ -f "$session_path" ]]; then
   session_id="$(<"$session_path")"
 fi
@@ -125,7 +128,7 @@ run_claude() {
     claude \
       --resume "$current_session_id" \
       -p "$prompt_text" \
-      --model claude-opus-4-6 \
+      --model "$claude_model" \
       --effort max \
       --allowedTools "Bash,Edit,NotebookEdit,Skill,Write" \
       --disallowedTools "WebFetch,WebSearch" \
@@ -135,7 +138,7 @@ run_claude() {
   else
     claude \
       -p "$prompt_text" \
-      --model claude-opus-4-6 \
+      --model "$claude_model" \
       --effort max \
       --allowedTools "Bash,Edit,NotebookEdit,Skill,Write" \
       --disallowedTools "WebFetch,WebSearch" \
