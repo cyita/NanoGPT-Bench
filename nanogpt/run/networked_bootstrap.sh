@@ -317,22 +317,32 @@ finalize() {
   # Killing the local child tree above does NOT reliably reap the remote
   # torchrun/submit_runs.py the bridges started over ssh (no PTY => no SIGHUP
   # propagation), so they can keep burning GPU after this leg ends. Reap them,
-  # but RUN-SCOPED: only processes whose cwd is inside THIS run's remote
-  # workspace, so a shared container's other experiments are untouched. (The old
-  # global `pkill -f train_gpt.py` would have killed unrelated runs.) Safe to do
-  # on every exit -- on a clean finish nothing under the ws is still running.
+  # but RUN-SCOPED, by matching THIS run's remote workspace path two ways:
+  #   - cwd under $ws      -> catches torchrun + its train_gpt.py workers, which
+  #                           cd into <ws>/.../<submission>.
+  #   - cmdline contains $ws -> catches the submit_runs.py orchestrator, whose
+  #                           cwd is /root (NOT under $ws) but whose argv carries
+  #                           <ws>/submissions/<name>. Without this it survives
+  #                           and just relaunches the next of its --runs trainings.
+  # Both are scoped to this run, so a shared container's other experiments are
+  # untouched (the old global `pkill -f train_gpt.py` would have hit them). Skip
+  # our own ssh shell ($$/$PPID): its argv embeds $ws too and would self-kill.
+  # Safe on every exit -- on a clean finish nothing under $ws is still running.
   if [[ "${BENCHMARK_KILL_REMOTE_ON_EXIT:-1}" == "1" ]]; then
     echo ">> reaping leftover remote training under $BENCHMARK_REMOTE_WS on $BENCHMARK_REMOTE" >&2
     local ws_q; ws_q="$(printf '%q' "$BENCHMARK_REMOTE_WS")"
     "${ssh_cmd[@]}" "$BENCHMARK_REMOTE" "
-      ws=$ws_q
+      ws=$ws_q; self=\$\$
       for sig in TERM TERM KILL; do
         hit=0
         for p in /proc/[0-9]*; do
-          cwd=\$(readlink \"\$p/cwd\" 2>/dev/null) || continue
-          case \"\$cwd\" in
-            \"\$ws\"|\"\$ws\"/*) kill -\$sig \"\${p#/proc/}\" 2>/dev/null && hit=1 ;;
-          esac
+          pid=\${p#/proc/}
+          [ \"\$pid\" = \"\$self\" ] && continue
+          [ \"\$pid\" = \"\$PPID\" ] && continue
+          cwd=\$(readlink \"\$p/cwd\" 2>/dev/null)
+          cl=\$(tr '\\0' ' ' <\"\$p/cmdline\" 2>/dev/null)
+          case \"\$cwd\" in \"\$ws\"|\"\$ws\"/*) kill -\$sig \"\$pid\" 2>/dev/null && hit=1; continue;; esac
+          case \"\$cl\"  in *\"\$ws\"*)         kill -\$sig \"\$pid\" 2>/dev/null && hit=1;; esac
         done
         [ \"\$hit\" = 0 ] && break
         sleep 2
