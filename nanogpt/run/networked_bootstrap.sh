@@ -261,6 +261,7 @@ read_budget() {
   [[ -n "$c" ]] && consumed_seconds="$c"
   (( consumed_seconds < 0 )) && consumed_seconds=0
   (( consumed_seconds > total_seconds )) && consumed_seconds=$total_seconds
+  return 0  # don't let a false (( )) clamp above poison the return status (set -e)
 }
 [[ -f "$budget_file" ]] && read_budget
 printf 'total_seconds=%s\nconsumed_seconds=%s\n' "$total_seconds" "$consumed_seconds" >"$budget_file"
